@@ -72,8 +72,9 @@ body.dl #top,body.dl #bar,body.dl #vig,body.dl #xh,body.dl #joy{display:none!imp
 <div id="promo"><div></div></div>
 <div id="op"><div id="obox"><b>Play online</b>
 <select id="oside"><option value="w">Play White</option><option value="b">Play Black</option><option value="r">Random side</option></select>
-<select id="omode"><option value="classic">Mode: Classic</option><option value="fps">Mode: FPS chess</option></select><button id="ocreate">Create room</button><button id="oquick">Quick match</button><button id="ocopy">Copy invite link</button>
+<select id="omode"><option value="classic">Mode: Classic</option><option value="fps">Mode: FPS chess</option></select><label style="font-size:13px;display:flex;gap:6px;align-items:center"><input type="checkbox" id="opub" checked>Public room (listed below)</label><button id="ocreate">Create room</button><button id="oquick">Quick match</button><button id="ocopy">Copy invite link</button>
 <div style="display:flex;gap:8px"><input id="ocode" maxlength="5" placeholder="ROOM CODE"><button id="ojoin">Join</button></div>
+<div style="display:flex;justify-content:space-between;align-items:center;font-size:13px"><b>Open rooms</b><button id="orefresh" style="padding:2px 10px">Refresh</button></div><div id="orooms" style="display:flex;flex-direction:column;gap:6px;max-height:140px;overflow:auto;font-size:13px"></div>
 <div id="omsg"></div><div style="display:flex;gap:8px"><button id="oleave" style="flex:1;display:none">Leave room</button><button id="oclose" style="flex:1">Close</button></div></div></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -1017,11 +1018,11 @@ let online=null;
 const myId=(()=>{const r=()=>Math.random().toString(36).slice(2,12);try{let v=localStorage.getItem('chessId');if(!v){v=r();localStorage.setItem('chessId',v)}return v}catch(x){return r()}})();
 const omsg=t=>$('omsg').textContent=t;
 function roomText(){$('gc').style.display=online?'flex':'none';$('room').textContent=online?`Room ${online.code} · You are ${online.col=='w'?'White':'Black'}${online.mode=='fps'?' · FPS':''}${online.opp?'':' · waiting for opponent…'}`:''}
-function sendMove(m){const o={fr:m.fr,fc:m.fc,tr:m.tr,tc:m.tc};if(m.f)o.f=m.f;if(m.promo)o.promo=m.promo;online.ref.child('moves/'+(online.seen++)).set(o)}
-function findMove(o){return legal(S,o.fr,o.fc).find(m=>m.tr==o.tr&&m.tc==o.tc&&(m.promo||'')==(o.promo||''))}
-function leaveOnline(){if(!online)return;const o=online;online=null;AV.visible=false;try{localStorage.removeItem('chessRoom')}catch(x){}history.replaceState(null,'',location.pathname);try{['end','draw','rematch','pos'].forEach(k=>o.ref.child(k).off());o.ref.child('moves').off();o.ref.child('players').off();o.ref.child('weapon').off()}catch(x){}
+function sendMove(m){const o={fr:m.fr,fc:m.fc,tr:m.tr,tc:m.tc};if(m.f)o.f=m.f;if(m.promo)o.promo=m.promo;if(m.lose)o.lose=1;online.ref.child('moves/'+(online.seen++)).set(o)}
+function findMove(o){return legal(S,o.fr,o.fc).find(m=>m.tr==o.tr&&m.tc==o.tc&&(m.promo||'')==(o.promo||''))&&Object.assign({},m,{lose:o.lose?1:0})}
+function leaveOnline(){if(!online)return;const o=online;online=null;AV.visible=false;try{o.lob&&o.lob.remove()}catch(x){}try{localStorage.removeItem('chessRoom')}catch(x){}history.replaceState(null,'',location.pathname);try{['end','draw','rematch','pos','duel/start'].forEach(k=>o.ref.child(k).off());o.ref.child('moves').off();o.ref.child('players').off();o.ref.child('weapon').off()}catch(x){}
  baseTheta=0;theta=0;view();roomText();$("oleave").style.display='none'}
-async function goOnline(code,create,want,mode){
+async function goOnline(code,create,want,mode,pub){
  if(typeof firebase=='undefined'||!FB_CFG.databaseURL||FB_CFG.databaseURL.includes('YOUR'))return omsg('Add your Firebase config to FB_CFG in the code first.');
  code=code.toUpperCase().replace(/[^A-Z0-9]/g,'');if(!code)return omsg('Enter a room code');
  try{
@@ -1036,16 +1037,21 @@ async function goOnline(code,create,want,mode){
   (Array.isArray(ex)?ex:Object.values(ex)).forEach(o=>{const m=o&&findMove(o);if(!m)return;hist.push({s:S,last});S=apply(S,m);last=m;online.seen++});
   draw();const oc=opp(col);
   ref.child('weapon/'+col).set(LOAD[col]);
-  ref.child('players/'+oc).on('value',s=>{if(online){online.opp=!!s.val();roomText()}});
+  ref.child('players/'+oc).on('value',s=>{if(online){online.opp=!!s.val();if(online.opp&&online.lob){online.lob.remove();online.lob=null}roomText()}});
   ref.child('weapon/'+oc).on('value',s=>{if(online)online.rw=s.val()});
   ref.child('moves').on('child_added',s=>{if(online&&+s.key>=online.seen){online.seen=+s.key+1;online.q.push(s.val())}});
-  NET(ref,col,oc);roomText();$('oleave').style.display='';$('op').style.display='none';omsg('');
+  NET(ref,col,oc);if(create&&pub){const e=firebase.database().ref('chess/_lobby/rooms/'+code);e.set({mode:mode||'classic',free:oc,t:firebase.database.ServerValue.TIMESTAMP});e.onDisconnect().remove();online.lob=e}roomText();$('oleave').style.display='';$('op').style.display='none';omsg('');
  }catch(e){omsg('Connection failed: '+(e.message||e))}}
 setInterval(()=>{if(!online||!online.q.length||busy||anim||over||$('promo').style.display=='flex')return;const m=findMove(online.q.shift());if(m)play(m,true)},120);
-$('onl').onclick=()=>{if(busy)return;omsg('');$('oleave').style.display=online?'':'none';$('op').style.display='flex'};
+$('onl').onclick=()=>{if(busy)return;refreshRooms();omsg('');$('oleave').style.display=online?'':'none';$('op').style.display='flex'};
 $('oclose').onclick=()=>$('op').style.display='none';
 $('oleave').onclick=()=>{leaveOnline();newGame();$('op').style.display='none'};
-$('ocreate').onclick=()=>goOnline(Math.random().toString(36).slice(2,7),true,$('oside').value,$('omode').value);
+$('ocreate').onclick=()=>goOnline(Math.random().toString(36).slice(2,7),true,$('oside').value,$('omode').value,$('opub').checked);
+async function refreshRooms(){const L=$('orooms');try{if(typeof firebase=='undefined'||FB_CFG.databaseURL.includes('YOUR')){L.textContent='Add Firebase config first';return}if(!firebase.apps.length)firebase.initializeApp(FB_CFG);
+ const v=(await firebase.database().ref('chess/_lobby/rooms').get()).val()||{},now=Date.now(),a=Object.entries(v).filter(([k,x])=>x&&now-x.t<36e5&&/^[A-Z0-9]{1,5}$/.test(k));L.textContent='';
+ if(!a.length){L.textContent='No open rooms — create one!';return}
+ a.forEach(([k,x])=>{const d=document.createElement('div');d.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:8px';const t=document.createElement('span');t.textContent=k+' · '+(x.mode=='fps'?'FPS chess':'Classic')+' · you play '+(x.free=='w'?'White':'Black');const b=document.createElement('button');b.textContent='Join';b.style.padding='2px 12px';b.onclick=()=>goOnline(k,false);d.append(t,b);L.appendChild(d)})}catch(e){L.textContent='Could not load rooms'}}
+$('orefresh').onclick=refreshRooms;
 $('ojoin').onclick=()=>goOnline($('ocode').value,false);
 
 const AV=new T.Group();AV.add(new T.Mesh(new T.CylinderGeometry(.3,.3,1.2,10),new T.MeshStandardMaterial({color:0xe4435f})));{const h=new T.Mesh(new T.SphereGeometry(.28,12,10),new T.MeshStandardMaterial({color:0xffd9b0}));h.position.y=.85;AV.add(h)}AV.visible=false;scene.add(AV);
@@ -1055,6 +1061,7 @@ function NET(ref,col,oc){
  ref.child('end').on('value',s=>{const v=s.val();if(!online)return;if(v){over=true;sel=null;$('status').textContent=v.t=='draw'?'Draw agreed':(v.by=='w'?'White':'Black')+' resigned — '+(v.by=='w'?'Black':'White')+' wins'}else if(online.ended){over=false;draw()}online.ended=!!v});
  ref.child('draw').on('value',s=>{const v=s.val();if(!online||!v||v==col)return;const ok=confirm('Opponent offers a draw. Accept?');ref.child('draw').remove();if(ok)ref.child('end').set({t:'draw'})});
  ref.child('rematch').on('value',s=>{const v=s.val()||{};if(online&&v.w&&v.b){ref.child('moves').remove();ref.child('end').remove();ref.child('rematch').remove();online.seen=0;online.q=[];newGame();$('note').textContent='Rematch!'}});
+ ref.child('duel/start').on('value',q=>{const v=q.val();if(!online||online.mode!='fps'||!v||v.by==col||D||busy||over)return;const a=S.b[v.fr]&&S.b[v.fr][v.fc],d=v.f=='ep'?S.b[v.fr][v.tc]:S.b[v.tr][v.tc];if(!a||!d||a[0]!=v.by||S.t!=v.by)return;busy=true;sel=null;draw();window.DM={fr:v.fr,fc:v.fc,tr:v.tr,tc:v.tc,f:v.f||undefined};startDuel(a,d,()=>{busy=false},{def:1})});
  ref.child('pos/'+oc).on('value',s=>{const v=s.val();if(v){AV.visible=true;AV.userData.t=v;AV.children[0].material.color.set(oc=='w'?0xf0f0f0:0x2a2d38)}});
 }
 let _n=0;setInterval(()=>{if(!online)return;const t=AV.userData.t;if(t){AV.position.x+=(t[0]-AV.position.x)*.35;AV.position.z+=(t[2]-AV.position.z)*.35;AV.position.y=t[1]-1;AV.rotation.y=t[3]}
@@ -1144,8 +1151,8 @@ railgun(a,b){const dv=b.clone().sub(a),L=dv.length(),m=new T.Mesh(new T.Cylinder
  const t0=performance.now();let h=0;fxs.push(t=>{const e=(t-t0)/700;if(e>.25&&!h){h=1;shake=.3;flashFX(0x66f0ff,.6);ringFX(b.x,b.z,0x66f0ff,5,500);sparks(b,0x99f8ff,50)}m.material.opacity=e<.25?e*4:Math.max(0,1-(e-.25)*1.4);m.scale.x=m.scale.z=1+e*3;if(e>=1){fxG.remove(m);return true}return false})}});
 WP.push(['shark','Shark Breach','Fin cruises in · Jaws: a shark leaps from the board and swallows the king','#5d7a96'],['spikes','Spike Pit','Impaled: steel erupts under every piece, king lifted on a giant spike','#ff4a4a'],['railgun','Railgun','Overcharge: charge-up, beam, army blown away, king disintegrates','#66f0ff']);
 WP.push(['mutiny','Mutiny','Betrayal · Mutiny: the army turns on its king and buries it','#ff3040'],['glitch','System Error','Glitch · The pieces corrupt, delete, KING NOT FOUND','#00ff60'],['flip','Table Flip','Rage quit · (╯°□°)╯︵ ┻━┻ the army is launched off the board','#ffb040'],['duck','Duck Apocalypse','Quack · 70 rubber ducks rain down, a giant one finishes the king','#ffd21a'],['zerog','Zero Gravity','Float · Supernova: the army spirals into space and detonates','#bfd0ff']);
-for(let i=WP.length;i--;)if(['dagger','sword','spear','axe','trident','katana','bow','shuriken','meteor','hammer','scythe','lightning','blades','ice','laser','flame','wreck','quake','tornado','bomb','press','guillotine','chains','rods','magnet','domino'].includes(WP[i][0]))WP.splice(i,1);
-Object.assign(AUTO_CAP,{P:'spikes',N:'railgun',B:'shark',R:'flip',Q:'glitch',K:'nuke'});Object.assign(AUTO_CUT,{P:'mutiny',N:'railgun',B:'shark',R:'flip',Q:'duck',K:'zerog'});
+for(let i=WP.length;i--;)if(['dagger','sword','spear','axe','trident','katana','bow','shuriken','meteor','hammer','scythe','lightning','blades','ice','laser','flame','wreck','quake','tornado','bomb','shark','press','guillotine','chains','rods','magnet','domino'].includes(WP[i][0]))WP.splice(i,1);
+Object.assign(AUTO_CAP,{P:'spikes',N:'railgun',B:'freeze',R:'flip',Q:'glitch',K:'nuke'});Object.assign(AUTO_CUT,{P:'mutiny',N:'railgun',B:'freeze',R:'flip',Q:'duck',K:'zerog'});
 for(const k in LOAD)if(!WP.some(w=>w[0]==LOAD[k]))LOAD[k]='auto';
 setTimeout(()=>{const c=location.hash.slice(1)||(()=>{try{return localStorage.getItem('chessRoom')}catch(x){}})();if(c&&!online)goOnline(c,false)},400);
 
@@ -1237,8 +1244,25 @@ Object.assign(CUT,{tsunami:{t:'Tsunami',bg:0x041a2e,nofade:1},portal:{t:'Portal'
 Object.assign(EXTRA,{tsunami(a,b){burst(fxG,b,80,0xbfe8ff,8,1,-14);ringFX(b.x,b.z,0x60c0ff,5,500);shake=.3},portal(a,b){ringFX(b.x,b.z,0xff8a20,4,600);ringFX(b.x,b.z,0x30a8ff,2.5,600);burst(fxG,b,60,0x80c0ff,6,1,2);shake=.2},slash(a,b){flashFX(0xffffff,.5);burst(fxG,b,80,0xaee8ff,14,.8,0);shake=.35}});
 WP.push(['tsunami','Tsunami','Wave · The sea retreats, then a wall of water sweeps the army away','#2a8ad0'],['portal','Portal','Warp · The army is sucked in and rains from the sky, the king lands last','#ff8a20'],['slash','Reality Slash','Dimension cut · The board is sliced into four and falls into the void','#b080ff']);
 capt('spikes',[[0,'The ground trembles…'],[700,'IMPALED'],[3300,'The king falls']]);capt('tsunami',[[0,'The sea retreats…'],[1800,'TSUNAMI'],[3600,'Swept away']]);capt('portal',[[0,'Reality opens…'],[1200,'THE PORTAL'],[4300,'The king returns… flat']]);capt('slash',[[0,'Reality holds its breath…'],[1800,'SLASH'],[2300,'DIMENSION CUT']]);
+
+// ===== ABSOLUTE ZERO (replaces shark: clean crystal geometry) =====
+SC.freeze=C=>{const{cin,kx,kz,king}=C,P=[...loserPieces(C),king],O=P.map(g=>g.position.clone()),im=new T.MeshStandardMaterial({color:0x9fe3ff,emissive:0x2a6a90,roughness:.08,metalness:.1,transparent:true,opacity:.62,flatShading:true}),fr=new T.Mesh(new T.CircleGeometry(1,64),FXM(0xbfefff,.35)),rim=new T.Mesh(new T.RingGeometry(.94,1,64),FXM(0xffffff,.9)),X=[];
+ fr.rotation.x=rim.rotation.x=-Math.PI/2;fr.position.set(kx,.07,kz);rim.position.set(kx,.08,kz);fr.scale.setScalar(.01);rim.scale.setScalar(.01);cin.add(fr,rim);
+ P.forEach((g,i)=>{const L=i==P.length-1,c=new T.Group(),n=L?9:6;for(let j=0;j<n;j++){const h=(L?2.6:1.7)*(.55+rs()*.6),w=(L?.5:.32)*(.7+rs()*.5),m=new T.Mesh(new T.ConeGeometry(w,h,5),im),a=j/n*6.283,k=j?1:0;m.position.set(Math.cos(a)*w*1.6*k,h/2,Math.sin(a)*w*1.6*k);m.rotation.set(Math.cos(a)*.35*k,0,-Math.sin(a)*.35*k);c.add(m)}
+  const co=new T.Mesh(new T.OctahedronGeometry(L?.9:.55),im);co.position.y=L?1.2:.75;co.scale.y=1.6;c.add(co);c.position.set(O[i].x,0,O[i].z);c.scale.setScalar(.001);c.visible=false;cin.add(c);X.push({c,d:Math.hypot(O[i].x-kx,O[i].z-kz),L,s:0})});
+ let kd=0;
+ return{dur:8000,up(e){const fo=ease(clp((e-300)/2800));fr.scale.setScalar(Math.max(.01,fo*12));rim.scale.setScalar(Math.max(.01,fo*12));rim.material.opacity=Math.max(0,.9*(1-clp((e-3100)/800)));fr.material.opacity=.35*(1-clp((e-5500)/1500));
+  if(e<3100&&e%60<20){const a=rs()*6.283;burst(cin,new T.Vector3(kx+Math.cos(a)*fo*12,.2,kz+Math.sin(a)*fo*12),8,0xdff8ff,3,.8,2,.1)}
+  X.forEach((x,i)=>{const t0=x.L?4000:300+x.d/12*2800,q=clp((e-t0)/450);if(e<t0)return;x.c.visible=true;x.c.scale.setScalar(ease(q)+.001);if(q>=1&&!x.s){x.s=1;shake=Math.max(shake,.2);burst(cin,new T.Vector3(O[i].x,.8,O[i].z),20,0xdff8ff,4,.8,-6,.12)}
+   if(!x.L&&e>5000+x.d*90&&x.s<2){x.s=2;x.c.visible=false;P[i].visible=false;shake=Math.max(shake,.25);burst(cin,new T.Vector3(O[i].x,.9,O[i].z),70,0xc8f0ff,9,1.3,-14,.16)}});
+  if(e>=6200&&!kd){kd=1;X[X.length-1].c.visible=false;king.visible=false;shake=2;flashFX(0xffffff,1);ringFX(kx,kz,0xbfefff,14,1100);burst(cin,new T.Vector3(kx,1,kz),600,0xdff8ff,20,2.4,-12,.2);burst(cin,new T.Vector3(kx,1,kz),200,0xffffff,12,1.6,-6,.14)}
+  C.cam(C.th0+e*.0004,1.05,.95-clp((e-4000)/2200)*.25,1.5)}}};
+CUT.freeze={t:'Absolute Zero',bg:0x06141e,nofade:1};
+Object.assign(EXTRA,{freeze(a,b){burst(fxG,b,70,0xc8f0ff,8,1,-12);ringFX(b.x,b.z,0xbfefff,5,500);flashFX(0xbfefff,.3);shake=.25}});
+WP.push(['freeze','Absolute Zero','Frost spreads · everything freezes solid, then shatters','#9fe3ff']);
+capt('freeze',[[0,'The temperature drops…'],[300,'ABSOLUTE ZERO'],[5000,'Shatter']]);
 // apply cinematic framing + bullet-time to every finisher
-cine('shark',[1450,2050,.25]);cine('spikes',[3300,3900,.3]);cine('railgun',[2200,2800,.2]);cine('zerog',[4100,4700,.2]);cine('mutiny',[4600,5300,.3]);cine('glitch',[3600,4300,.3]);cine('duck',[3800,4500,.25]);cine('flip');cine('tsunami',[3500,4100,.25]);cine('portal',[7200,7900,.3]);cine('slash',[1800,2500,.2]);
+cine('shark',[1450,2050,.25]);cine('spikes',[3300,3900,.3]);cine('railgun',[2200,2800,.2]);cine('zerog',[4100,4700,.2]);cine('mutiny',[4600,5300,.3]);cine('glitch',[3600,4300,.3]);cine('duck',[3800,4500,.25]);cine('flip');cine('freeze',[6200,6800,.25]);cine('tsunami',[3500,4100,.25]);cine('portal',[7200,7900,.3]);cine('slash',[1800,2500,.2]);
 newGame();requestAnimationFrame(loop);
 </script><script>
 (()=>{
@@ -1300,8 +1324,8 @@ function wmodel(t){
 function rayBox(o,d,b){let t0=0,t1=1e9;for(const[p,v,lo,hi]of[[o.x,d.x,b.x-b.hw,b.x+b.hw],[o.y,d.y,b.y0,b.h],[o.z,d.z,b.z-b.hd,b.z+b.hd]]){
  if(Math.abs(v)<1e-8){if(p<lo||p>hi)return 1e9}else{let a=(lo-p)/v,c=(hi-p)/v;if(a>c)[a,c]=[c,a];t0=Math.max(t0,a);t1=Math.min(t1,c);if(t0>t1)return 1e9}}return t0}
 function raySph(o,d,c,r){const ox=c.x-o.x,oy=c.y-o.y,oz=c.z-o.z,tca=ox*d.x+oy*d.y+oz*d.z;if(tca<0)return 1e9;const d2=ox*ox+oy*oy+oz*oz-tca*tca;return d2>r*r?1e9:tca-Math.sqrt(r*r-d2)}
-const hb=e=>{if(e.pl)return[[e.y+1.5,.26,1],[e.y+.95,.42,0],[e.y+.4,.4,0]];const H=HT[e.t]*SC;return[[e.y+H*.88,.42,1],[e.y+H*.55,.55,0],[e.y+H*.22,.7,0]]};
-const fw=e=>({x:-Math.sin(e.yaw),z:-Math.cos(e.yaw)}),other=e=>e===D.pl?D.en:D.pl,eye=e=>e.pl?e.y+EH:e.y+HT[e.t]*SC*.8;
+const hb=e=>{if(e.pl||e.net)return[[e.y+1.5,.26,1],[e.y+.95,.42,0],[e.y+.4,.4,0]];const H=HT[e.t]*SC;return[[e.y+H*.88,.42,1],[e.y+H*.55,.55,0],[e.y+H*.22,.7,0]]};
+const fw=e=>({x:-Math.sin(e.yaw),z:-Math.cos(e.yaw)}),other=e=>e===D.pl?D.en:D.pl,eye=e=>e.pl||e.net?e.y+EH:e.y+HT[e.t]*SC*.8;
 function wallT(o,d,mx=70){let t=mx;
  const a=d.x*d.x+d.z*d.z;if(a>1e-9){const b=o.x*d.x+o.z*d.z,c=o.x*o.x+o.z*o.z-RA*RA,ds=b*b-a*c;if(ds>0)t=Math.min(t,(-b+Math.sqrt(ds))/a)}
  if(d.y<0){let tf=(o.y-.11)/-d.y;if(Math.abs(o.x+d.x*tf)<BH&&Math.abs(o.z+d.z*tf)<BH)t=Math.min(t,tf);else t=Math.min(t,(o.y+.5)/-d.y)}
@@ -1317,7 +1341,7 @@ function wall(x,z,hw,hd,hg,mat,ttl){x=Math.max(-RA+hw,Math.min(RA-hw,x));z=Math.
 
 // ---------- combat ----------
 function hurt(e,dmg,src,head){
- if(D.end)return;if(e.shield>0)dmg*=.3;e.hp=Math.max(0,e.hp-dmg);e.hit=.18;
+ if(D.end)return;if(e.net){e.hit=.18;D.hm=.15;D.hmH=head;return}if(e.shield>0)dmg*=.3;e.hp=Math.max(0,e.hp-dmg);e.hit=.18;
  if(e.pl){D.shake=.35;D.dmgT=.35}else{D.hm=.15;D.hmH=head}
  if(e.hp<=0)finish(e===D.pl?D.en:D.pl)}
 function breakWall(b){boom(v3(b.x,b.y0+1.5,b.z),3.6,0xff9a3a);D.dg.remove(b.m);const i=D.obs.indexOf(b);if(i>=0)D.obs.splice(i,1);D.shake=Math.max(D.shake,.2);for(const e of[D.pl,D.en])if(Math.hypot(e.x-b.x,e.z-b.z)<4){hurt(e,15,null,false);e.kb=[(e.x-b.x)*3,(e.z-b.z)*3]}}
@@ -1468,21 +1492,25 @@ function ai(dt){
 
 // ---------- lifecycle ----------
 const HIDE=()=>[piecesG,overG,aimM,vm];
-function startDuel(a,d,cb){
+function startDuel(a0,d0,cb,net){const sw=net&&net.def,a=sw?d0:a0,d=sw?a0:d0;
  const cam=new T.PerspectiveCamera(78,innerWidth/innerHeight,.05,200);cam.rotation.order='YXZ';scene.add(cam);
  const dg=new T.Group();scene.add(dg);const bg=new T.Group(),bo=[frame,rim,grid,trim,...SQM];bo.forEach(o=>{scene.remove(o);bg.add(o)});bg.scale.set(BS,BS,BS);scene.add(bg);BG={bg,bo};HIDE().forEach(o=>o.visible=false);mapG.scale.set(1.5,1,1.5);applyEnv();
  const sc=sun.shadow.camera;D0={l:sc.left,far:sc.far};Object.assign(sc,{left:-24,right:24,top:24,bottom:-24,far:80});sc.updateProjectionMatrix();
- D={cam,dg,obs:[],fx:[],pr:[],sg:[],t0:performance.now(),intro:2.6,time:90,end:null,endT:0,shake:0,rec:0,flash:0,dmgT:0,hm:0,mT:0,spin:0,joy:{x:0,y:0},cb,att:a,def:d,fov:78};
+ D={cam,dg,obs:[],fx:[],pr:[],sg:[],t0:performance.now(),intro:2.6,time:90,end:null,endT:0,shake:0,rec:0,flash:0,dmgT:0,hm:0,mT:0,spin:0,joy:{x:0,y:0},cb,att:a0,def:d0,fov:78};
  const M=window.DM||{fr:7,fc:4,tr:0,tc:4},P1=v3((M.fc-3.5)*BS,0,(M.fr-3.5)*BS),P2=v3((M.tc-3.5)*BS,0,(M.tr-3.5)*BS);let dir=P2.clone().sub(P1);const dl=dir.length();dir=dl>.01?dir.divideScalar(dl):v3(0,0,-1);const hh=Math.max(dl/2,6.5),mid=P1.clone().add(P2).multiplyScalar(.5),A=mid.clone().addScaledVector(dir,-hh),B2=mid.clone().addScaledVector(dir,hh);
  [A,B2].forEach(p=>{p.x=Math.max(-BH+1,Math.min(BH-1,p.x));p.z=Math.max(-BH+1,Math.min(BH-1,p.z))});
  const skip=new Set([M.fr+','+M.fc,M.tr+','+M.tc,M.fr+','+M.tc]);
  for(let r=0;r<8;r++)for(let c=0;c<8;c++){const p=S.b[r][c];if(!p||skip.has(r+','+c))continue;const x=(c-3.5)*BS,z=(r-3.5)*BS;if(Math.hypot(x-A.x,z-A.z)<2.8||Math.hypot(x-B2.x,z-B2.z)<2.8)continue;
   const g=build(p);g.scale.setScalar(2.4);g.rotation.y=p[0]=='b'?Math.PI:0;g.position.set(x,base(x,z),z);dg.add(g);const r2=.42*2.4*.85;addObs(x,z,r2,r2,base(x,z),base(x,z)+HT[p[1]]*2.4,g)}
  const mk=(p,x,z,yaw,pl)=>{const t=p[1],K=KIT[t];return{p,t,col:p[0],K,hp:K.hp,max:K.hp,x,y:base(x,z),z,vy:0,vx:0,vz:0,yaw,pitch:0,cd:{E:0,Q:0,R:0,F:0},fire:0,mel:0,shield:0,lev:0,dash:null,kb:[0,0],hit:0,pl,gr:true,aiT:0,react:.5,sd:1,stuck:0,ao:v3(0,2,0),ad:v3(0,0,-1)}};
- D.pl=mk(a,A.x,A.z,Math.atan2(-(B2.x-A.x),-(B2.z-A.z)),true);D.en=mk(d,B2.x,B2.z,Math.atan2(-(A.x-B2.x),-(A.z-B2.z)),false);
+ const Q1=sw?B2:A,Q2=sw?A:B2;D.pl=mk(a,Q1.x,Q1.z,Math.atan2(-(Q2.x-Q1.x),-(Q2.z-Q1.z)),true);D.en=mk(d,Q2.x,Q2.z,Math.atan2(-(Q1.x-Q2.x),-(Q1.z-Q2.z)),false);
  const g=build(d);g.scale.setScalar(SC);const bub=new T.Mesh(new T.SphereGeometry(.8,24,16),new T.MeshBasicMaterial({color:0x60b0ff,transparent:true,opacity:.28,depthWrite:false}));bub.position.y=.55;bub.visible=false;g.add(bub);
  const piv=new T.Group();piv.rotation.y=d[0]=='b'?Math.PI:0;piv.position.set(0,HT[d[1]]*.5,0);const ew=wmodel(d[1]);ew.scale.setScalar(.5);ew.position.set(.28,0,-.25);piv.add(ew);g.add(piv);
  dg.add(g);D.eg=g;D.bub=bub;
+ if(net){g.scale.setScalar(1.8/HT[d[1]]);D.en.net=true;const N=D.net={ref:online.ref.child('duel'),col:online.col,oc:opp(online.col),att:!sw,s:null,acc:0,last:performance.now()},
+  r1=N.ref.child('s/'+N.oc),f1=q=>{N.s=q.val()},r3=N.ref.child('ev/'+N.oc),f2=q=>{const v=q.val();if(!D||D.net!==N||D.end||!v||!v.o)return;const e=D.en;e.ao=v3(...v.o);e.ad=v3(...v.d).normalize();
+   if(v.k=='f'){e.fire=0;_fire(e,e.ao.clone(),e.ad.clone())}else if(v.k=='m'){e.mel=0;_melee(e)}else{e.cd[v.k]=0;_ab(e,v.k)}};
+  r1.on('value',f1);r3.on('child_added',f2);N.ls=[[r1,'value',f1],[r3,'child_added',f2]]}
  const vg=wmodel(a[1]);vg.position.set(.26,-.24,-.5);cam.add(vg);D.gun=vg;D.gp=vg.position.clone();
  if(vg.userData.mz!=null){const mf=new T.Mesh(new T.SphereGeometry(.07,10,8),new T.MeshBasicMaterial({color:0xffd070}));mf.position.set(0,0,vg.userData.mz);mf.visible=false;vg.add(mf);D.mf=mf}
  $d('dn1').textContent=NAME(a);$d('dn2').textContent=NAME(d);
@@ -1492,10 +1520,11 @@ function startDuel(a,d,cb){
  keys={};mouse=rmb=tf=tj=tm=0;tk={}}
 let D0=null,BG=null;
 function finish(w){
+ if(D.net){const p=D.pl;D.net.ref.child('s/'+D.net.col).set([r2(p.x),r2(p.y),r2(p.z),r2(p.yaw),r2(p.pitch),Math.round(p.hp)])}
  D.end={win:w===D.pl};D.endT=2.1;const b=$d('dbn');b.className='on '+(D.end.win?'win':'lose');
- b.innerHTML=D.end.win?`VICTORY<small>${NAME(D.att)} captures ${NAME(D.def)}</small>`:`DEFEATED<small>${NAME(D.def)} holds the square</small>`;
+ b.innerHTML=D.end.win?`VICTORY<small>${D.net?NAME(D.pl)+' wins the duel':NAME(D.att)+' captures '+NAME(D.def)}</small>`:`DEFEATED<small>${D.net?NAME(D.en)+' wins the duel':NAME(D.def)+' holds the square'}</small>`;
  $d('dsc').style.display='none';if(document.pointerLockElement)document.exitPointerLock()}
-function close(){const w=D.end.win,cb=D.cb;scene.remove(D.dg,D.cam,BG.bg);BG.bo.forEach(o=>{BG.bg.remove(o);scene.add(o)});BG=null;mapG.scale.set(1,1,1);HIDE().forEach(o=>o.visible=true);vm.visible=false;const sc=sun.shadow.camera;Object.assign(sc,{left:-7,right:7,top:7,bottom:-7,far:D0.far});sc.updateProjectionMatrix();
+function close(){const w=D.end.win,cb=D.cb;if(D.net){const N=D.net;N.ls.forEach(l=>l[0].off(l[1],l[2]));if(N.att)N.ref.remove()}scene.remove(D.dg,D.cam,BG.bg);BG.bo.forEach(o=>{BG.bg.remove(o);scene.add(o)});BG=null;mapG.scale.set(1,1,1);HIDE().forEach(o=>o.visible=true);vm.visible=false;const sc=sun.shadow.camera;Object.assign(sc,{left:-7,right:7,top:7,bottom:-7,far:D0.far});sc.updateProjectionMatrix();
  document.body.classList.remove('dl');hud.style.display='none';hud.classList.remove('t');D=null;keys={};mouse=rmb=0;try{fps.keys={}}catch(x){}cb(w)}
 
 function upd(){
@@ -1513,7 +1542,7 @@ function upd(){
   if(p.K.w.k=='bow'){if(mouse||tf){if(p.fire<=0){p.draw=Math.min(1,(p.draw||0)+dt);D.rec=p.draw*.35}}else if((p.draw||0)>.2)fire(p,o.clone().addScaledVector(d,.3),d);else p.draw=0}else if(mouse||tf)fire(p,o.clone().addScaledVector(d,.3),d);
   if(keys.KeyV||tm||(rmb&&p.t!='R'))melee(p);
   for(const k of['E','Q','R','F'])if(keys['Key'+k]||tk[k])ab(p,k);if(keys.ShiftLeft||keys.ShiftRight)ab(p,'Q');
-  ai(dt);$d('dsc').style.display=D.scope?'block':'none'}
+  D.net?netTick(dt):ai(dt);$d('dsc').style.display=D.scope?'block':'none'}
  else{D.endT-=dt;if(D.end.win){D.eg.rotation.z=Math.min(1.5,D.eg.rotation.z+dt*2.2);D.eg.position.y=Math.max(-.8,D.eg.position.y-dt*.3)}if(D.endT<=0)return close()}
  updProj(dt);
  const dd=D.end&&!D.end.win?Math.min(1,2.1-D.endT):0;
@@ -1556,18 +1585,32 @@ const up=e=>{if(e.pointerType=='mouse'){if(e.button==0)mouse=0;if(e.button==2)rm
 addEventListener('pointerup',up,true);addEventListener('pointercancel',up,true);
 hud.querySelectorAll('[data-k]').forEach(b=>{const k=b.dataset.k,s=v=>e=>{e.preventDefault();e.stopPropagation();if(k=='f')tf=v;else if(k=='j')tj=v;else if(k=='m')tm=v;else tk[k]=v};b.addEventListener('pointerdown',s(1));b.addEventListener('pointerup',s(0));b.addEventListener('pointercancel',s(0));b.addEventListener('pointerleave',s(0))});
 
+// ---------- live PvP duels ----------
+const r2=x=>Math.round(x*100)/100,_fire=fire,_melee=melee,_ab=ab;
+const evs=(k,o,d)=>{const N=D&&D.net;if(N&&o&&d)N.ref.child('ev/'+N.col).push({k,o:[r2(o.x),r2(o.y),r2(o.z)],d:[r2(d.x),r2(d.y),r2(d.z)]})};
+fire=function(e,o,d){if(D&&D.net&&e===D.pl&&!(e.fire>0||D.end||D.intro>0))evs('f',o,d);return _fire(e,o,d)};
+melee=function(e){if(D&&D.net&&e===D.pl&&!(e.mel>0||D.end||D.intro>0))evs('m',e.ao,e.ad);return _melee(e)};
+ab=function(e,k){if(D&&D.net&&e===D.pl&&e.K.a[k]&&!(e.cd[k]>0||D.end||D.intro>0))evs(k,e.ao,e.ad);return _ab(e,k)};
+function netTick(dt){const e=D.en,N=D.net,s=N.s;
+ if(s){const k=Math.min(1,dt*14);e.x+=(s[0]-e.x)*k;e.y+=(s[1]-e.y)*k;e.z+=(s[2]-e.z)*k;let da=s[3]-e.yaw;da=Math.atan2(Math.sin(da),Math.cos(da));e.yaw+=da*k;e.pitch=s[4];e.hp=s[5];N.last=performance.now();if(e.hp<=0&&!D.end)return finish(D.pl)}
+ e.shield=Math.max(0,e.shield-dt);e.hit=Math.max(0,e.hit-dt);e.dash=null;e.kb=[0,0];
+ if(performance.now()-N.last>12000&&!D.end)return finish(D.pl);
+ N.acc+=dt;if(N.acc>=.05){N.acc=0;const p=D.pl;N.ref.child('s/'+N.col).set([r2(p.x),r2(p.y),r2(p.z),r2(p.yaw),r2(p.pitch),Math.round(p.hp)])}}
 // ---------- hook into chess captures ----------
 const _play=play;
+function loseApply(m,att,def){const n=clone(S);n.b[m.fr][m.fc]=null;n.t=opp(S.t);n.ep=null;n.hm=0;
+ if(att[1]=='R'){if(m.fr==7&&m.fc==0)n.cr.wQ=0;if(m.fr==7&&m.fc==7)n.cr.wK=0;if(m.fr==0&&m.fc==0)n.cr.bQ=0;if(m.fr==0&&m.fc==7)n.cr.bK=0}
+ hist.push({s:S,last});S=n;last={fr:m.fr,fc:m.fc,tr:m.tr,tc:m.tc};lastCap=null;draw(false);
+ $('note').textContent=NAME(def)+' defended — '+NAME(att)+' was destroyed'}
 play=function(m,remote){
- const att=S.b[m.fr][m.fc],def=m.f=='ep'?S.b[m.fr][m.tc]:S.b[m.tr][m.tc];
- if(remote||online||!duelOn||!def||att[1]=='K'||D||busy)return _play(m,remote);
+ const att=S.b[m.fr][m.fc],def=m.f=='ep'?S.b[m.fr][m.tc]:S.b[m.tr][m.tc],fpsOn=online&&online.mode=='fps';
+ if(remote&&fpsOn&&m.lose&&def&&att[1]!='K'){sel=null;return loseApply(m,att,def)}
+ if(remote||(online&&!fpsOn)||!duelOn&&!fpsOn||!def||att[1]=='K'||D||busy)return _play(m,remote);
  sel=null;busy=true;draw();
- window.DM=m;startDuel(att,def,win=>{busy=false;
+ window.DM=m;if(fpsOn)online.ref.child('duel').set({start:{fr:m.fr,fc:m.fc,tr:m.tr,tc:m.tc,by:online.col,f:m.f||null,n:Date.now()}});
+ startDuel(att,def,win=>{busy=false;
   if(win)return _play(m);
-  const n=clone(S);n.b[m.fr][m.fc]=null;n.t=opp(S.t);n.ep=null;n.hm=0;
-  if(att[1]=='R'){if(m.fr==7&&m.fc==0)n.cr.wQ=0;if(m.fr==7&&m.fc==7)n.cr.wK=0;if(m.fr==0&&m.fc==0)n.cr.bQ=0;if(m.fr==0&&m.fc==7)n.cr.bK=0}
-  hist.push({s:S,last});S=n;last={fr:m.fr,fc:m.fc,tr:m.tr,tc:m.tc};lastCap=null;draw(false);
-  $('note').textContent=NAME(def)+' defended — '+NAME(att)+' was destroyed'})};
+  m.lose=1;loseApply(m,att,def);if(online)sendMove(m)},fpsOn?{}:undefined)};
 
 // ---------- chess clock ----------
 const MODES=[0,180,300,600,900];let mi=3,CL={w:600,b:600};

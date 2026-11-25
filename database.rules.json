@@ -1,9 +1,36 @@
 {
   "rules": {
     "chess": {
+      "_lobby": {
+        ".read": true,
+        ".write": true,
+        "rooms": {
+          "$code": {
+            ".validate": "newData.hasChildren(['mode','free','t']) && (newData.child('mode').val() == 'classic' || newData.child('mode').val() == 'fps') && (newData.child('free').val() == 'w' || newData.child('free').val() == 'b')"
+          }
+        }
+      },
       "$room": {
         ".read": true,
-        ".write": true
+        ".write": true,
+        "mode": { ".validate": "newData.isString() && (newData.val() == 'classic' || newData.val() == 'fps')" },
+        "duel": {
+          "start": {
+            ".validate": "newData.hasChildren(['fr','fc','tr','tc','by'])"
+          },
+          "s": {
+            "$col": {
+              ".validate": "($col == 'w' || $col == 'b') && newData.hasChildren(['0','1','2','3','4','5']) && newData.child('5').isNumber()"
+            }
+          },
+          "ev": {
+            "$col": {
+              "$id": {
+                ".validate": "newData.hasChildren(['k','o','d'])"
+              }
+            }
+          }
+        }
       }
     }
   }
