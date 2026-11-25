@@ -1,0 +1,10 @@
+{
+  "rules": {
+    "chess": {
+      "$room": {
+        ".read": true,
+        ".write": true
+      }
+    }
+  }
+}
